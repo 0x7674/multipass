@@ -2,6 +2,8 @@
 
 # TODO
 # urllib2 timeout
+# getopts
+# support single domain as well as infile
 
 import urllib2
 import sys
@@ -12,10 +14,10 @@ from threading import Thread
 from Queue import Queue, Empty
 
 queue = Queue()
-headers = {'X-Forwarded-For': '127.0.0.1', 'User-Agent': 'Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)'}
+headers = {'User-Agent': 'Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)'}
 threadcount = 10
 results = {}
-ports = [80, 443]
+ports = [80]#, 443]
 domain_list_f = open(sys.argv[1], 'r')
 bf_wordlist_f = open(sys.argv[2], 'r')
 logfile = open(sys.argv[3], 'w')
@@ -33,7 +35,6 @@ def signal_handler(signal, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 def test_domain(domain):
-	# check domain resolves
 	try:
 		this_ip = socket.gethostbyname(domain)
 		return this_ip
@@ -42,7 +43,6 @@ def test_domain(domain):
 
 def test_ports(ip, ports):
 	open_ports = []
-	# check ports
 	for port in ports:
 		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		sock_result = sock.connect_ex((ip,port))
@@ -52,21 +52,40 @@ def test_ports(ip, ports):
 
 	return open_ports
 
+def verify_requests(url):
+	req = urllib2.Request(url, None, headers)
+	res1 = urllib2.urlopen(req)
+	res2 = urllib2.urlopen(req)
+	res3 = urllib2.urlopen(req)
+	res4 = urllib2.urlopen(req)
+	res5 = urllib2.urlopen(req)
+	len1 = len(res1.read())
+	len2 = len(res2.read())
+	len3 = len(res3.read())
+	len4 = len(res4.read())
+	len5 = len(res5.read())
+	if (len1 == len2 == len3 == len4 == len5):
+		#print "equal: " + `len1`
+		return len1
+	else:
+		#print "not equal"
+		return "ne:"+url
+	
+
+
+
 def get_404_control(scheme, domain, port):
 	print "Checking 404 for " + scheme + domain + ':' + `port`
 	control = {}
 	try:
 		req1 = urllib2.Request(scheme + domain + ':' + `port` + "/" + "Neg-Existorz", None, headers)
-		response_404_1 = urllib2.urlopen(req1)
+		len_404_1 = verify_requests(scheme + domain + ':' + `port` + "/" + "Neg-Existorz")
 		req2 = urllib2.Request(scheme + domain + ':' + `port` + "/" + "Neg-ExistorzNeg-Existorz", None, headers)
-		response_404_2 = urllib2.urlopen(req2)
-		len_404_1 = len(response_404_1.read())
-		len_404_2 = len(response_404_2.read())
-		if (len_404_1 != len_404_2) and ( ( (len_404_2 % 12) != 0) and ( (len_404_1 % 12) != 0) ):
-			print "weird length responses"
-			control['type404'] = 'wtf'
-			control['staticlen'] = 'wtf'
-			control['multiplier'] = 'wtf'
+		len_404_2 = verify_requests(scheme + domain + ':' + `port` + "/" + "Neg-ExistorzNeg-Existorz")
+		if (len_404_1 != len_404_2) and ( ( (len_404_2 % 12) != 0) and ( (len_404_1 % 12) != 0) ): # FIXME stoopz
+			#print "weird length responses"
+			control['type404'] = 'error'
+			control['error'] = 'Server returns inconsistent response lengths.'
 		else:
 			if (len_404_2-len_404_1) == 0:
 				control['type404'] = 'static200'
@@ -84,16 +103,19 @@ def get_404_control(scheme, domain, port):
 			control['staticlen'] = 0
 			control['multiplier'] = 1
 		else:
-			print "some httperror"
-			control['type404'] = 'wtf'
+			#print "some httperror"
+			control['type404'] = 'error'
+			control['error'] = 'An unknown HTTPError occurred: ' + errorDetail
 
 	except urllib2.URLError as urlError:
-		print "some urlerror"
-		control['type404'] = 'wtf'
+		#print "some urlerror"
+		control['type404'] = 'error'
+		control['error'] = 'An unknown URLError occurred: ' + urlError
 	except:
-		print "some timeout, probably. catchall"
+		#print "some timeout, probably. catchall"
 		# probably a timeout of some description
-		control['type404'] = 'wtf'
+		control['type404'] = 'error'
+		control['error'] = 'An unknown error occurred - probably a timeout.'
 
 	return control
 
@@ -205,18 +227,18 @@ for domain in domain_list:
 
 		control_404 = {}
 		control_404 = get_404_control(scheme, dom, port)
-		if control_404['type404'] == 'not-https':
-			print "Port " + `port` + ' is not running HTTPS as expected. Skipping..'
-			continue
-		elif control_404['type404'] == 'wtf':
+		if control_404['type404'] == 'error':
 			print "Port " + `port` + ' needs to be assessed manually, skipping..'
+			logfile.write(dom + ':' + `port` + ' needs to be assessed manually. Details: ' + `control_404['error']` + '\n')
 			continue
+		"""
 		elif control_404['type404'] == 'static200':
 			print "Static 404 response size of " + `control_404['staticlen']` + "."
 		elif control_404['type404'] == 'variable200':
 			print "Variable 404 response size. "
 		elif control_404['type404'] == 'standard':
 			print "normal 404."
+		"""
 		print "Bruting " + scheme + dom + ':' + `port` + '..'
 
 		for testcase in bf_wordlist:
@@ -243,3 +265,4 @@ for domain in domain_list:
 		sys.stdout.flush()		
 
 logfile.close()
+print "Done!"
