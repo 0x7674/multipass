@@ -1,15 +1,16 @@
 #!/usr/bin/python
 
+# vt 2k14
 # TODO
 # urllib2 timeout
-# getopts
-# support single domain as well as infile
 
 import urllib2
 import sys
 import signal
 import socket
 import re
+import getopt
+import argparse
 from threading import Thread
 from Queue import Queue, Empty
 
@@ -17,16 +18,32 @@ queue = Queue()
 headers = {'User-Agent': 'Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)'}
 threadcount = 10
 results = {}
-ports = [80]#, 443]
-domain_list_f = open(sys.argv[1], 'r')
-bf_wordlist_f = open(sys.argv[2], 'r')
-logfile = open(sys.argv[3], 'w')
+ports = [80, 443]
 
-domain_list = domain_list_f.readlines()
-bf_wordlist = bf_wordlist_f.readlines()
+parser = argparse.ArgumentParser(prog='multipass.py')
+mutually_exclusive_parms = parser.add_mutually_exclusive_group(required=True)
+mutually_exclusive_parms.add_argument('-d', '--domain', help='domain to check (single)')
+mutually_exclusive_parms.add_argument('-l', '--listdomains', help='file containing domains to check')
+parser.add_argument('-r', '--reqfile', help='file containing wordlist of requests (default=pages)', default='pages')
+parser.add_argument('-o', '--outfile', help='output file', required=True)
+parser.add_argument('-t', '--threadcount', help='number of threads (default=10)', default=10)
+parser.add_argument('-v', '--verbose', help='verbose output', default=False)
 
-domain_list_f.close()
-bf_wordlist_f.close()
+myargs = parser.parse_args()
+
+logfile = open(myargs.outfile, 'w')
+wordlist_f = open(myargs.reqfile, 'r')
+wordlist = wordlist_f.readlines()
+wordlist_f.close()
+
+if myargs.domain:
+	domainlist = [myargs.domain]
+elif myargs.listdomains:
+	domlist_f = open(myargs.listdomains, 'r')
+	domainlist = domlist_f.readlines()
+	domlist_f.close()
+else:
+	print "+++ Divide By Cucumber Error. Please Reinstall Universe And Reboot +++"
 
 def signal_handler(signal, frame):
 	print "\nCtrl-C pressed, exiting.."
@@ -206,7 +223,8 @@ def parse_response(response_object, url, type404, staticlen, multiplier):
 ##################
 ##################
 
-for domain in domain_list:
+
+for domain in domainlist:
 	dom = domain.rstrip()
 	portscan_results = []
 	domain_ip = test_domain(dom)
@@ -241,7 +259,7 @@ for domain in domain_list:
 		"""
 		print "Bruting " + scheme + dom + ':' + `port` + '..'
 
-		for testcase in bf_wordlist:
+		for testcase in wordlist:
 			page = testcase.rstrip()
 			queue.put(scheme + dom + ':' + `port` + '/' + page)
 		workers = []
