@@ -2,23 +2,31 @@
 
 # vt 2k14
 # TODO
-# urllib2 timeout
+# urllib2 timeout // fuck that, rewrite this using requests
+# ascii art
+# handle redirects properly
+# usage blurb - headers, etc
+# ports option
 
 import urllib2
+import requests
 import sys
 import signal
 import socket
 import re
-import getopt
 import argparse
 from threading import Thread
 from Queue import Queue, Empty
+import redirect_handler
 
 queue = Queue()
 headers = {'User-Agent': 'Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)'}
-threadcount = 10
 results = {}
 ports = [80, 443]
+
+opener = urllib2.build_opener(redirect_handler.SmartRedirectHandler(), urllib2.HTTPDefaultErrorHandler())
+
+urllib2.install_opener(opener)
 
 parser = argparse.ArgumentParser(prog='multipass.py')
 mutually_exclusive_parms = parser.add_mutually_exclusive_group(required=True)
@@ -71,23 +79,44 @@ def test_ports(ip, ports):
 
 def verify_requests(url):
 	req = urllib2.Request(url, None, headers)
+	"""
 	res1 = urllib2.urlopen(req)
 	res2 = urllib2.urlopen(req)
 	res3 = urllib2.urlopen(req)
 	res4 = urllib2.urlopen(req)
 	res5 = urllib2.urlopen(req)
-	len1 = len(res1.read())
-	len2 = len(res2.read())
-	len3 = len(res3.read())
-	len4 = len(res4.read())
-	len5 = len(res5.read())
+	"""
+	print "q"
+	#res1 = opener.open(req)
+	res1 = strong_request(req)
+	res2 = opener.open(req)
+	res3 = opener.open(req)
+	res4 = opener.open(req)
+	res5 = opener.open(req)
+	print "x"
+	len1 = res1.headers['Content-Length']
+	len2 = res2.headers['Content-Length']
+	len3 = res3.headers['Content-Length']
+	len4 = res4.headers['Content-Length']
+	len5 = res5.headers['Content-Length']
+	print "y"
 	if (len1 == len2 == len3 == len4 == len5):
-		#print "equal: " + `len1`
+		print "equal: " + `len1`
 		return len1
 	else:
-		#print "not equal"
+		print "not equal"
 		return "ne:"+url
 	
+
+def strong_request(request):
+	try:
+		response = opener.open(request)
+	except:
+		print "Error of some kind.."
+
+	print "o"
+	print response.status
+	return response
 
 
 
@@ -99,7 +128,7 @@ def get_404_control(scheme, domain, port):
 		len_404_1 = verify_requests(scheme + domain + ':' + `port` + "/" + "Neg-Existorz")
 		req2 = urllib2.Request(scheme + domain + ':' + `port` + "/" + "Neg-ExistorzNeg-Existorz", None, headers)
 		len_404_2 = verify_requests(scheme + domain + ':' + `port` + "/" + "Neg-ExistorzNeg-Existorz")
-		if (len_404_1 != len_404_2) and ( ( (len_404_2 % 12) != 0) and ( (len_404_1 % 12) != 0) ): # FIXME stoopz
+		if (len_404_1 != len_404_2) and ( ( ((len_404_2 - len_404_1) % 12) != 0) ): 
 			#print "weird length responses"
 			control['type404'] = 'error'
 			control['error'] = 'Server returns inconsistent response lengths.'
@@ -119,21 +148,21 @@ def get_404_control(scheme, domain, port):
 			control['type404'] = 'standard'
 			control['staticlen'] = 0
 			control['multiplier'] = 1
+
 		else:
 			#print "some httperror"
 			control['type404'] = 'error'
-			control['error'] = 'An unknown HTTPError occurred: ' + errorDetail
+			control['error'] = 'An unknown HTTPError occurred: ' + str(errorDetail)
 
 	except urllib2.URLError as urlError:
 		#print "some urlerror"
 		control['type404'] = 'error'
-		control['error'] = 'An unknown URLError occurred: ' + urlError
+		control['error'] = 'An unknown URLError occurred: ' + str(urlError)
 	except:
 		#print "some timeout, probably. catchall"
 		# probably a timeout of some description
 		control['type404'] = 'error'
 		control['error'] = 'An unknown error occurred - probably a timeout.'
-
 	return control
 
 def cp_thread(**kwargs):
@@ -175,12 +204,14 @@ def cp_thread(**kwargs):
 
 def errorClean(errorRaw):
 	errorMsg = str(errorRaw)
-	if errorMsg == "HTTP Error 404: Not Found":
+	if re.search('404', errorMsg):# == "HTTP Error 404: Not Found":
 		return 404
-	elif errorMsg == "HTTP Error 403: Forbidden":
+	elif re.search('403', errorMsg):# == "HTTP Error 403: Forbidden":
 		return 403
-	elif errorMsg == "HTTP Error 401: Unauthorized":
+	elif re.search('401', errorMsg):# == "HTTP Error 401: Unauthorized":
 		return 401
+	elif re.search('30', errorMsg):# == "HTTP Error 401: Unauthorized":
+		return 300
 	else:
 		return errorRaw
 
@@ -263,7 +294,7 @@ for domain in domainlist:
 			page = testcase.rstrip()
 			queue.put(scheme + dom + ':' + `port` + '/' + page)
 		workers = []
-		for i in range(threadcount):
+		for i in range(myargs.threadcount):
 			worker = Thread(group=None, target=cp_thread, name=None, args=(), kwargs=control_404)
 			worker.start()
 			workers.append(worker)
