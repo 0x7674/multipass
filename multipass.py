@@ -2,13 +2,14 @@
 
 # vt 2k14
 # TODO
-# urllib2 timeout // fuck that, rewrite this using requests
+# best runthru - 504mins.
 # ascii art
-# handle redirects properly
-# usage blurb - headers, etc
 # ports option
+# sqlite out
+# stdout out
+# randomly generate 404 check value - no more NegExist0rz
+# accept netblock / range as target input
 
-import urllib2
 import requests
 import sys
 import signal
@@ -17,16 +18,12 @@ import re
 import argparse
 from threading import Thread
 from Queue import Queue, Empty
-import redirect_handler
 
 queue = Queue()
+outqueue = Queue()
 headers = {'User-Agent': 'Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)'}
-results = {}
+#results = {}
 ports = [80, 443]
-
-opener = urllib2.build_opener(redirect_handler.SmartRedirectHandler(), urllib2.HTTPDefaultErrorHandler())
-
-urllib2.install_opener(opener)
 
 parser = argparse.ArgumentParser(prog='multipass.py')
 mutually_exclusive_parms = parser.add_mutually_exclusive_group(required=True)
@@ -70,180 +67,165 @@ def test_ports(ip, ports):
 	open_ports = []
 	for port in ports:
 		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		sock_result = sock.connect_ex((ip,port))
-		if sock_result == 0:
+		sock.settimeout(3.0)
+		try:
+			sock_result = sock.connect((ip,port)) # broken
 			open_ports.append(port)
+		except socket.timeout:
+			pass
+		except:
+			pass
+
 		sock.close()
 
 	return open_ports
 
 def verify_requests(url):
-	req = urllib2.Request(url, None, headers)
-	"""
-	res1 = urllib2.urlopen(req)
-	res2 = urllib2.urlopen(req)
-	res3 = urllib2.urlopen(req)
-	res4 = urllib2.urlopen(req)
-	res5 = urllib2.urlopen(req)
-	"""
-	print "q"
-	#res1 = opener.open(req)
-	res1 = strong_request(req)
-	res2 = opener.open(req)
-	res3 = opener.open(req)
-	res4 = opener.open(req)
-	res5 = opener.open(req)
-	print "x"
-	len1 = res1.headers['Content-Length']
-	len2 = res2.headers['Content-Length']
-	len3 = res3.headers['Content-Length']
-	len4 = res4.headers['Content-Length']
-	len5 = res5.headers['Content-Length']
-	print "y"
-	if (len1 == len2 == len3 == len4 == len5):
-		print "equal: " + `len1`
-		return len1
+	results_404 = {}
+
+	for i in range(5):
+		queue.put(url)
+	workers = []
+	for i in range(5):
+		worker = Thread(group=None, target=cp_thread, name=None, args=(), kwargs={'type404':'check404'})
+		worker.start()
+		workers.append(worker)
+	for worker in workers:
+		worker.join()
+
+	resultstmp = {}
+	rescount = 1
+	while True:
+		try:
+			result = {}
+			result = outqueue.get_nowait()
+			resultstmp[rescount] = result
+			rescount = (rescount + 1)
+
+		except Empty:
+			break
+
+	if (resultstmp[1][url]['code'] == 404) and (resultstmp[2][url]['code'] == 404) and (resultstmp[5][url]['code'] == 404):
+		results_404['code'] = 404
+		results_404['len'] = 0
+	elif (resultstmp[1][url]['length'] == resultstmp[2][url]['length'] == resultstmp[3][url]['length'] == resultstmp[4][url]['length'] == resultstmp[5][url]['length']):
+		results_404['code'] = resultstmp[2][url]['code']
+		results_404['len'] =resultstmp[1][url]['length']
 	else:
-		print "not equal"
-		return "ne:"+url
-	
+		results_404['code'] = resultstmp[2][url]['code']
+		results_404['len'] = "ne:" + url
 
-def strong_request(request):
-	try:
-		response = opener.open(request)
-	except:
-		print "Error of some kind.."
-
-	print "o"
-	print response.status
-	return response
-
-
+	return results_404
 
 def get_404_control(scheme, domain, port):
-	print "Checking 404 for " + scheme + domain + ':' + `port`
 	control = {}
 	try:
-		req1 = urllib2.Request(scheme + domain + ':' + `port` + "/" + "Neg-Existorz", None, headers)
-		len_404_1 = verify_requests(scheme + domain + ':' + `port` + "/" + "Neg-Existorz")
-		req2 = urllib2.Request(scheme + domain + ':' + `port` + "/" + "Neg-ExistorzNeg-Existorz", None, headers)
-		len_404_2 = verify_requests(scheme + domain + ':' + `port` + "/" + "Neg-ExistorzNeg-Existorz")
-		if (len_404_1 != len_404_2) and ( ( ((len_404_2 - len_404_1) % 12) != 0) ): 
-			#print "weird length responses"
-			control['type404'] = 'error'
-			control['error'] = 'Server returns inconsistent response lengths.'
-		else:
-			if (len_404_2-len_404_1) == 0:
-				control['type404'] = 'static200'
-				control['staticlen'] = len_404_1
-				control['multiplier'] = 1
-			else:
-				difference = (len_404_2-len_404_1)/12
-				control['type404'] = 'variable200'
-				control['staticlen'] = (len_404_1-(difference * 12))
-				control['multiplier'] = difference
-	except urllib2.HTTPError as errorDetail:
-		cleaned = errorClean(errorDetail)
-		if cleaned == 404:
-			control['type404'] = 'standard'
-			control['staticlen'] = 0
-			control['multiplier'] = 1
-
-		else:
-			#print "some httperror"
-			control['type404'] = 'error'
-			control['error'] = 'An unknown HTTPError occurred: ' + str(errorDetail)
-
-	except urllib2.URLError as urlError:
-		#print "some urlerror"
-		control['type404'] = 'error'
-		control['error'] = 'An unknown URLError occurred: ' + str(urlError)
+		results_404_1 = verify_requests(scheme + domain + ':' + `port` + "/" + "Neg-Existorz")
 	except:
-		#print "some timeout, probably. catchall"
-		# probably a timeout of some description
 		control['type404'] = 'error'
-		control['error'] = 'An unknown error occurred - probably a timeout.'
+		control['error'] = '404 check failed.'
+		return control
+
+	# 404 checks seem to work. lets do the second.
+	results_404_2 = verify_requests(scheme + domain + ':' + `port` + "/" + "Neg-ExistorzNegExist.php")
+
+	if (results_404_1['code'] == 404 and results_404_2['code'] == 404):
+		control['type404'] = 'standard'
+
+	elif results_404_1['len'] == "ne:"+scheme+domain+":"+`port`+"/"+"Neg-Existorz":
+		control['type404'] = 'error'
+		control['error'] = 'Variable responses for same HTTP request.'
+
+	elif results_404_1['len'] == results_404_2['len']:
+		control['type404'] = 'static200'
+		control['staticlen'] = results_404_1['len']
+		control['multiplier'] = 1
+
+	elif results_404_2['len'] == "ne:"+scheme+domain+":"+`port`+"/"+"Neg-ExistorzNegExist.php":
+		control['type404'] = 'error'
+		control['error'] = 'Variable responses for same HTTP request.'
+
+	elif (results_404_1['len'] - results_404_2['len']) % 12 == 0:
+		difference = (results_404_2['len'] - results_404_1['len'])	
+		control['type404'] = 'variable200'
+		control['staticlen'] = (results_404_1['len'] - difference)
+		control['multiplier'] = (difference/12)
+
+	else:
+		control['type404'] = 'error'
+		control['error'] = 'Variable responses for same HTTP request. Maybe in the future, though..'
+
 	return control
+
 
 def cp_thread(**kwargs):
 	try:
 		while True:
 			url = queue.get_nowait()
+			results = {}
 			try:
-				req = urllib2.Request(url, None, headers)
-				http_response = urllib2.urlopen(url)
-				response_parsed = parse_response(http_response, url, **kwargs) 
+				res = requests.get(url, headers=headers, verify=False, timeout=3.0)
+				response_parsed = parse_response(res, url, **kwargs) 
+
 				res_code = response_parsed['code']
 				res_length = response_parsed['len']
 				res_mark = response_parsed['mark']
-				sys.stdout.write(res_mark),
-				sys.stdout.flush()
-			except urllib2.HTTPError as errorDetail:
-				sys.stdout.write("."),
-				res_code = errorClean(errorDetail)
-				res_length = 0
-				sys.stdout.flush()
-			except urllib2.URLError as urlError:
-				sys.stdout.write("x"),
-				res_code = 1 # timeout
-				res_length = 0
-				sys.stdout.flush()
 			except:
-				sys.stdout.write("X"),
-				res_code = 1
+				res_code = 999
 				res_length = 0
+				res_mark = '?'
+
+			if kwargs['type404']!='check404':
+				sys.stdout.write(res_mark),
 				sys.stdout.flush()
 
 			results[url] = {}
 			results[url]['code'] = res_code
 			results[url]['length'] = res_length
+			outqueue.put(results)
 
 	except Empty:
 		pass
 
 
-def errorClean(errorRaw):
-	errorMsg = str(errorRaw)
-	if re.search('404', errorMsg):# == "HTTP Error 404: Not Found":
-		return 404
-	elif re.search('403', errorMsg):# == "HTTP Error 403: Forbidden":
-		return 403
-	elif re.search('401', errorMsg):# == "HTTP Error 401: Unauthorized":
-		return 401
-	elif re.search('30', errorMsg):# == "HTTP Error 401: Unauthorized":
-		return 300
-	else:
-		return errorRaw
-
-def parse_response(response_object, url, type404, staticlen, multiplier):
-	request_len = re.sub('http.+:\d+\/','',url)
+def parse_response(response_object, url, type404, staticlen=0, multiplier=1):
+	request_len = len(re.sub('http.+:\d+\/','',url))
 	parsed_results = {}
-	response_len = len(response_object.read())
-	if type404 == 'standard':
-		parsed_results['code'] = 200
-		parsed_results['len'] = response_len
-		parsed_results['mark'] = '!'
-		# If it was a 400 error it wouldn't have made it this far anyway		
-	
-	elif type404 == 'static200':
-		if staticlen == response_len:
-			parsed_results['code'] = 404
-			parsed_results['len'] = 0
-			parsed_results['mark'] = '.'
-		else:
-			parsed_results['code'] = 200
-			parsed_results['len'] = response_len
-			parsed_results['mark'] = '!'
+	response_len = len(response_object.text)
+	response_code = response_object.status_code
 
-	elif type404 == 'variable200':
-		if len(response_object.read()) == (staticlen + (multiplier * request_len)):
-			parsed_results['code'] = 404
-			parsed_results['len'] = 0
-			parsed_results['mark'] = '.'
-		else:
+	if response_code != 200:
+		parsed_results['code'] = response_code
+		parsed_results['len'] = 0
+		parsed_results['mark'] = '.'
+
+	else: # response code is 200
+		if type404 == 'static200':
+			if staticlen == response_len:
+				parsed_results['code'] = 404
+				parsed_results['len'] = 0
+				parsed_results['mark'] = '.'
+			else:
+				parsed_results['code'] = 200
+				parsed_results['len'] = response_len
+				parsed_results['mark'] = '!'
+
+		elif type404 == 'variable200':
+			if response_len == (staticlen + (multiplier * request_len)):
+				parsed_results['code'] = 404
+				parsed_results['len'] = 0
+				parsed_results['mark'] = '.'
+			else:
+				parsed_results['code'] = 200
+				parsed_results['len'] = response_len
+				parsed_results['mark'] = '!'
+
+		elif type404 == 'standard' or type404 == 'check404':
+			# a legit, old fashioned 200
 			parsed_results['code'] = 200
 			parsed_results['len'] = response_len
 			parsed_results['mark'] = '!'
+			
 
 	return parsed_results
 
@@ -258,11 +240,15 @@ def parse_response(response_object, url, type404, staticlen, multiplier):
 for domain in domainlist:
 	dom = domain.rstrip()
 	portscan_results = []
+
+	print "Analyzing " + dom + ".."
+	print "Resolving.."
 	domain_ip = test_domain(dom)
 	if domain_ip == 'nxdomain':
 		print dom + ' does not resolve, skipping..'
 		continue
 
+	print "Portscanning.."
 	portscan_results = test_ports(domain_ip, ports)
 	if len(portscan_results) < 1:
 		print dom + ' has no open ports, skipping..'
@@ -275,43 +261,45 @@ for domain in domainlist:
 			scheme = 'http://'
 
 		control_404 = {}
-		control_404 = get_404_control(scheme, dom, port)
+		print "Checking 404 for port " + `port` + ".."
+		control_404 = get_404_control(scheme, dom, port) # XXX here
 		if control_404['type404'] == 'error':
-			print "Port " + `port` + ' needs to be assessed manually, skipping..'
+			print dom + ":" + `port` + ' needs to be assessed manually, skipping..'
 			logfile.write(dom + ':' + `port` + ' needs to be assessed manually. Details: ' + `control_404['error']` + '\n')
 			continue
-		"""
-		elif control_404['type404'] == 'static200':
-			print "Static 404 response size of " + `control_404['staticlen']` + "."
-		elif control_404['type404'] == 'variable200':
-			print "Variable 404 response size. "
-		elif control_404['type404'] == 'standard':
-			print "normal 404."
-		"""
+
 		print "Bruting " + scheme + dom + ':' + `port` + '..'
 
 		for testcase in wordlist:
 			page = testcase.rstrip()
 			queue.put(scheme + dom + ':' + `port` + '/' + page)
 		workers = []
-		for i in range(myargs.threadcount):
+
+		for i in range(int(myargs.threadcount)):
 			worker = Thread(group=None, target=cp_thread, name=None, args=(), kwargs=control_404)
 			worker.start()
 			workers.append(worker)
 		for worker in workers:
 			worker.join()
 			
-		for res in results:
-			if results[res]['code'] == 1:
-				rcode = 'Timeout'
-			else:
-				rcode = `results[res]['code']`
+		try:
+			while True:
+				res = outqueue.get_nowait()
+				url = dict.keys(res)[0]
+				if res[url]['code'] == 1:
+					rcode = 'Timeout'
+				else:
+					rcode = `res[url]['code']`
 
-			logfile.write(res + ' : ' + rcode + ' (' + `results[res]['length']` + ' bytes)\n')
+				logfile.write(url + ' : ' + rcode + ' (' + `res[url]['length']` + ' bytes)\n')
+		except Empty:
+			pass#continue
 
-		results = {}
 		sys.stdout.write("\n")
 		sys.stdout.flush()		
 
+		with outqueue.mutex:
+			outqueue.queue.clear()
+
 logfile.close()
-print "Done!"
+print "\nDone!"
